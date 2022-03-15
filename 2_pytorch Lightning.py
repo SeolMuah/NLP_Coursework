@@ -43,6 +43,23 @@ class MNISTDataset(Dataset):
         sample = [image, label]
         return sample
 
+# fns = {
+#                 'train' : 
+#                 { 
+#                     'image' : f'./mnist/data/train.image.npy',
+#                     'label' : f'./mnist/data/train.label.npy'
+#                 },
+#                 'test' : 
+#                 {
+#                     'image' : f'./mnist/data/test.image.npy',
+#                     'label' : f'./mnist/data/test.label.npy'
+#                 }
+#         }
+# trainSet = MNISTDataset(fns['train'])
+# testSet = MNISTDataset(fns['test'])
+# len(trainSet), len(testSet) #(60000, 10000)
+# trainSet[0], testSet[0]
+
 #데이터 배치 별에 대한 것
 class MNISTDataModule(pl.LightningDataModule):
     def __init__(self, 
@@ -97,7 +114,13 @@ class MNISTDataModule(pl.LightningDataModule):
     def teardown(self, stage: str = None):
         # Used to clean-up when the run is finished
         ...
-        
+
+
+dm = MNISTDataModule()
+dm.train_dataloader().batch_size
+len(dm.train_dataloader().dataset)
+
+
 from torchmetrics import functional as FM
 
 # pl.LightningModule is inherited from the nn.Module
@@ -223,7 +246,7 @@ def cli_main():
     # training
     # ------------
     trainer = pl.Trainer(
-                            max_epochs=50, 
+                            max_epochs=5, 
                             callbacks=[EarlyStopping(monitor='val_loss')],
                             gpus = 1 # if you have gpu -- set number, otherwise zero 
                             #0으로 하면 gpu안쓴다
