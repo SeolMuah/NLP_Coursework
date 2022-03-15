@@ -391,9 +391,10 @@ print(a)
 print(a.shape) #torch.Size([3, 2, 4])
 
 torch.max(a) #전체에서 최댓값 : tensor(28) 
-torch.max(a, dim=0) #첫번째 차원에서 max값 리턴
-torch.max(a, dim=1) #두번째 차원에서 max값 리턴
-torch.max(a, dim=-1) #마지막 차원에서 max값 리턴
+torch.max(a, dim=0) #첫번째 차원에서 max tensor 리턴
+torch.max(a, dim=1) #두번째 차원에서 max tensor 리턴
+torch.max(a, dim=-1) #마지막 차원에서 max tensor 리턴
+
 
 torch.argmax(a, dim=0) #최댓값을 갖는 인덱스만
 torch.argmax(a, dim=1)
@@ -401,11 +402,15 @@ torch.argmax(a, dim=2)
 
 a.dtype 
 b = a.to(torch.float)
-torch.mean(b)
-torch.mean(b, dim=(0,1,2))
-torch.mean(b, dim=0)
+torch.mean(b) #전체 평균
+torch.mean(b, dim=0) #각 데이터별 같은 자리 평균
 torch.mean(b, dim=1)
 torch.mean(b, dim=2)
+
+torch.mean(b, dim=(0,1,2)) #전체평균
+torch.mean(b, dim=(0,1)) #torch.mean(b, dim=0) 후에 차원 1 기준 평균
+torch.mean(b, dim=(1,2)) #torch.mean(b, dim=1) 후에 차원 2 기준 평균
+
 
 
 
