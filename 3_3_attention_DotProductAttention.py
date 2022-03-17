@@ -375,9 +375,9 @@ def check_attention(model, ex, input_vocab, output_vocab):
             data = { 'scores':[] }
             for word, score in zip(input_sym, scores):
                 data['scores'].append( score )
-                df = pd.DataFrame(data)
+            df = pd.DataFrame(data)
             df.index = input_sym
-
+            
             plt.figure()
             #sns.set(rc = {'figure.figsize':(2,8)})
             sns.heatmap(df, cmap='RdYlGn_r')

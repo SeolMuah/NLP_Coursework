@@ -37,36 +37,41 @@ class BahdanauAttention(nn.Module):
 
         # W is used for project query to the attention dimension
         # U is used for project each item to the attention dimension
-        self.W = nn.Linear(self.query_dim,  self.attention_dim, bias=False)
-        self.U = nn.Linear(self.item_dim,   self.attention_dim, bias=False)
+        self.W = nn.Linear(self.query_dim,  self.attention_dim, bias=False) #쿼리를 어텐션 차원으로 바꿈
+        self.U = nn.Linear(self.item_dim,   self.attention_dim, bias=False) #아이템을 어텐션 차원으로 바꿈
         
         # v is used for calculating attention score which is scalar value
-        self.v = nn.Parameter(torch.randn(1, attention_dim, dtype=torch.float))
+        self.v = nn.Parameter(torch.randn(1, attention_dim, dtype=torch.float)) #torch.Size([1, 512])
+        
+      
 
     def _calculate_reactivity(self, query_vector, multiple_items):
         B, N, H = multiple_items.shape  # [B,N,H]
 
+        #D는 어텐션 벡터 차원
         # linear projection is applied to the last dimension
-        query_vector    = query_vector.unsqueeze(1)
-        projected_q     = self.W(query_vector)      # [B,1,Q] --> [B, 1, D] in case of H=D
-        projected_item  = self.U(multiple_items)    # [B,N,H] --> [B, N, D] in case of H=D
+        query_vector    = query_vector.unsqueeze(1) #torch.Size([200, 512]) => torch.Size([200, 1, 512])
+        projected_q     = self.W(query_vector)      # [B,1,Q] --> [B, 1, D] in case of Q=D,  torch.Size([200, 1, 512]) => torch.Size([200, 1, 512]), 어텐션 차원으로 바꿔줌
+        projected_item  = self.U(multiple_items)    # [B,N,H] --> [B, N, D] in case of H=D,  torch.Size([200, 12, 512]) => torch.Size([200, 12, 512]), 어텐션 차원으로 바꿔줌
 
         # note that broadcasting is performed when adding different shape
-        added_itmes = projected_q + projected_item  # [B, 1, D] + [B, N, D] --> [B, N, D]
-        tanh_items  = torch.tanh(added_itmes)       # [B,N,D]
+        added_itmes = projected_q + projected_item  # [B, 1, D] + [B, N, D] --> [B, N, D] 아이템 벡터 모두에 쿼리 벡터를 더함
+        tanh_items  = torch.tanh(added_itmes)       # [B,N,D] -1 ~ 1 로 정규화
        
-        v_t = self.v.transpose(1,0)
-        batch_v = v_t.expand(B,self.attention_dim,1)        # [B, D, 1]
-        reactivity_scores = torch.bmm(tanh_items, batch_v)  # [B,N,D] x [B,D,1] --> [B, N, 1]
+        v_t = self.v.transpose(1,0) ##torch.Size([1, 512]) => #torch.Size([512, 1])
+        batch_v = v_t.expand(B,self.attention_dim,1)        # [B, D, 1] torch.Size([200, 512, 1])
+        
+        #mm은 행렬간 곱, bmm은 배치가 있는 경우 사용
+        reactivity_scores = torch.bmm(tanh_items, batch_v)  # [B,N,D] x [B,D,1] --> [B, N, 1] #각 아이템별로 v_t를 닷프로덕트 진행
         reactivity_scores = reactivity_scores.squeeze(-1)   # [B, N, 1] --> [B, N]
         return reactivity_scores #[B, N]
 
     def forward(self, query_vector, multiple_items, mask):
         """
         Inputs:
-            query_vector:   [query_vector hidden_size]
-            multiple_items: [batch_size, num_of_items, item_vector hidden_size]
-            mask:           [batch_size, num_of_items, num_of_items]  1 for valid item, 0 for invalid item
+            query_vector:   [query_vector hidden_size] #torch.Size([200, 512])
+            multiple_items: [batch_size, num_of_items, item_vector hidden_size] #torch.Size([200, 12, 512])
+            mask:           [batch_size, num_of_items]  1 for valid item, 0 for invalid item #torch.Size([200, 12])
         Returns:
             blendded_vector:    [batch_size, item_vector hidden_size]
             attention_scores:   [batch_size, num_of_items]
@@ -83,8 +88,9 @@ class BahdanauAttention(nn.Module):
         # 4) [blend]      try to blend multiple items with attention scores 
 
         # Step-1) reactivity
-        reactivity_scores = self._calculate_reactivity(query_vector, multiple_items)
-
+        reactivity_scores = self._calculate_reactivity(query_vector, multiple_items) #쿼리와 아이템 합침
+        #torch.Size([200, 12]) 
+        
         # Step-2) masking
         # The mask marks valid positions so we invert it using `mask & 0`.
         # detail : check the masked_fill_() of pytorch 
@@ -92,14 +98,17 @@ class BahdanauAttention(nn.Module):
 
         # Step-3) attention score
         attention_scores = F.softmax(reactivity_scores, dim=1) # over the item dimensions
-
+        #torch.Size([200, 12]) #위에서 구한 반응성이 큰것이 높은 비율을 갖게됨 (모든 비율의 합은 1)
+        
         # Step-4) blend multiple items
         # merge by weighted sum
-        attention_scores = attention_scores.unsqueeze(1) # [B, 1, #_of_items]
+        attention_scores = attention_scores.unsqueeze(1) # [B, 1, #_of_items] #torch.Size([200, 1, 12]) 
 
         # [B, 1, #_of_items] * [B, #_of_items, dim_of_item] --> [B, 1, dim_of_item]
-        blendded_vector = torch.matmul(attention_scores, multiple_items) 
-        blendded_vector = blendded_vector.squeeze(1) # [B, dim_of_item] 
+        ##torch.Size([200, 1, 12]) matmul torch.Size([200, 12, 512])
+        #matmul은 브로드캐스트
+        blendded_vector = torch.bmm(attention_scores, multiple_items) #torch.Size([200, 1, 512])
+        blendded_vector = blendded_vector.squeeze(1) # [B, dim_of_item]  #torch.Size([200, 512])
 
         return blendded_vector, attention_scores
 
@@ -187,7 +196,7 @@ class NumberDataModule(pl.LightningDataModule):
         self.batch_size = batch_size
         self.max_seq_length = max_seq_length 
 
-        input_vocab, output_vocab = self.make_vocab('./data/numbers/train.txt')
+        input_vocab, output_vocab = self.make_vocab('./data/numbers/train.txt') #값에 대한 아이디 딕셔너리
         self.input_vocab_size  = len( input_vocab )
         self.output_vocab_size = len( output_vocab )
         self.padding_idx = input_vocab['<pad>']
@@ -195,7 +204,7 @@ class NumberDataModule(pl.LightningDataModule):
         self.all_train_dataset = NumberDataset('./data/numbers/train.txt', input_vocab, output_vocab, max_seq_length)
         self.test_dataset      = NumberDataset('./data/numbers/test.txt', input_vocab, output_vocab, max_seq_length)
 
-        self.input_r_vocab  = { v:k for k,v in input_vocab.items() }
+        self.input_r_vocab  = { v:k for k,v in input_vocab.items() } #아이디에 대한 값 딕셔너리
         self.output_r_vocab = { v:k for k,v in output_vocab.items() }
 
         # random split train / valiid for early stopping
@@ -203,23 +212,23 @@ class NumberDataModule(pl.LightningDataModule):
         tr = int(N*0.8) # 8 for the training
         va = N - tr     # 2 for the validation 
         self.train_dataset, self.valid_dataset = torch.utils.data.random_split(self.all_train_dataset, [tr, va])
-
+  
 
     def make_vocab(self, fn):
-        input_tokens = []
-        output_tokens = []
         data = load_data(fn)
-
-        for seqs, query, y in data:
-            for token in seqs:
-                input_tokens.append(token)
-            output_tokens.append(y)
         
-        input_tokens = list(set(input_tokens))
-        output_tokens = list(set(output_tokens)) 
+        input_tokens = sorted(list(set([x for seqs, query, y in data for x in seqs])))
+        output_tokens = sorted(list(set([y for seqs, query, y in data])))
+        # for seqs, query, y in data:
+        #     for token in seqs:
+        #         input_tokens.append(token)
+        #     output_tokens.append(y)
+        
+        # input_tokens = list(set(input_tokens))
+        # output_tokens = list(set(output_tokens)) 
 
-        input_tokens.sort()
-        output_tokens.sort()
+        # input_tokens.sort()
+        # output_tokens.sort()
 
         # [input vocab]
         # add <pad> symbol to input tokens as a first item
@@ -260,17 +269,30 @@ class Attention_Number_Finder(pl.LightningModule):
         #   - for simplicity, we make all the dimensions as same. 
 
         # symbol_number_character to vector_number
-        self.digit_emb = nn.Embedding(self.hparams.input_vocab_size, 
-                                      self.hparams.d_model, 
-                                      padding_idx=self.hparams.padding_idx)
+        self.digit_emb = nn.Embedding(self.hparams.input_vocab_size, #num_embeddings : 임베딩을 할 단어들의 개수. 다시 말해 단어 집합의 크기입니다.
+                                      self.hparams.d_model, #embedding_dim : 임베딩 할 벡터의 차원입니다. 사용자가 정해주는 하이퍼파라미터입니다. (단어당 벡터의 크기)
+                                      padding_idx=self.hparams.padding_idx) #padding_idx : 선택적으로 사용하는 인자입니다. 패딩을 위한 토큰의 인덱스를 알려줍니다.
+                                                                            #padding_idx do not contribute to the gradient,  the embedding vector at padding_idx is not updated during training
 
+        
+        #인코딩 시퀀스(전체 x입력)를 피처 벡터로 만드는 과정 인코딩
         # sequence encoder using RNN
-        self.encoder = nn.LSTM(d_model, int(self.hparams.d_model/2), # why? since bidirectional LSTM
+        #모델은 거의 2층으로만 사용하는데, 3층 이상으로 레이어를 쌓을 수록 효과가 거의 미미
+        self.encoder = nn.LSTM(d_model, int(self.hparams.d_model/2), #  두개의 히든벡터가 합쳐짐 why? since bidirectional LSTM
                             num_layers=2, 
                             bidirectional=True,
                             batch_first=True
-                          )
-
+                          )#인풋 벡터의 크기, 히든 벡터의 크기
+        
+        #LSTM OUPUT 결과는 HiddenState, 셀상태 Cellstate
+        #LSTM의 핵심 Key는 diagram의 상단을 통과하는 수평선인 Cell State, 
+        # Cell State는 일종의 컨베이어 벨트와 같다.
+        # 전체 Chain을 따라 직진하며, 약간의 작은 선형 상호작용이 있을 뿐이다.
+        # 이를 통해, 정보는 변하지 않으며, 그저 흘러가기가 매우 쉽다.
+        # self.encoder = nn.LSTM(d_model, self.hparams.d_model, #  두개의 히든벡터가 합쳐짐 why? since bidirectional LSTM
+        #             batch_first=True
+        #             )#인풋 벡터의 크기, 히든 벡터의 크기
+                
         # attention mechanism
         self.att = BahdanauAttention(item_dim=self.hparams.d_model,
                                      query_dim=self.hparams.d_model,
@@ -280,29 +302,45 @@ class Attention_Number_Finder(pl.LightningModule):
         self.to_output = nn.Linear(self.hparams.d_model, self.hparams.output_vocab_size) # D -> a single number
 
         # loss
-        self.criterion = nn.CrossEntropyLoss()  
+        #-log(exp(x[class])/SIGMA_j[exp(x_j)]) #x가 커지면 손실 0 x가 작아지면 손실 무한대로 발산
+        self.criterion = nn.CrossEntropyLoss() 
+        
 
     def forward(self, seq_ids, q_id, weight):
         # ------------------- ENCODING with ATTENTION -----------------#
+        #B:배치사이즈, T:문장의 길이, D:단어의 사이즈
         # [ Digit Character Embedding ]
-        # seq_ids : [B, max_seq_len]
-        seq_embs = self.digit_emb(seq_ids.long()) # [B, max_seq_len, emb_dim]
-
-        # [ Sequence of Numbers Encoding ]
-        seq_encs, _ = self.encoder(seq_embs) # [B, max_seq_len, enc_dim*2]  since we have 2 layers
+        # seq_ids : [B, max_seq_len] = 배치 사이즈 개수 만큼 [숫자 아이디가 있는 시퀀스, 길이 :max_seq_len]
+        seq_embs = self.digit_emb(seq_ids.long()) # [B, max_seq_len, emb_dim] #emb_dim : 숫자하나당 벡터 크기
+        #torch.Size([200, 12, 512])
         
+        # [ Sequence of Numbers Encoding ]
+        seq_encs, hidden = self.encoder(seq_embs) # [B, max_seq_len, enc_dim*2]  since we have 2 layers
+        #seq_encs : LSTM 토근별 모든 아웃풋, torch.Size([200, 12, 512]) #
+        #hidden[0] : LSTM 마지막 층의 히든층 값, torch.Size([4, 200, 256]) #4인 이유는 layer2개 및 양방향 2개 총 4개
+        #seq_encs[0][-1][:256] 마지막 히든층값 == hidden[0][2][0], seq_encs[0][0][:256] 첫번째 히든층값 == hidden[0][3][0] *이해하기 어려움
+        
+        #<LSTM layer1이고, 양방향이 아닌 경우hidden[0][0][0]==seq_encs[0][-1]과 같음>
+        #hidden[1] : LSTM 마지막 층의 CellState 값(이것을 통해 히든값 즉, 아웃풋을 만들어냄), torch.Size([4, 200, 256]) 
+        
+     
         # with query (context)
         query = self.digit_emb(q_id) # [B, query_dim]
-
+        #q_id.shape == 200
+        #query.shape == torch.Size([200, 512])
+        
         # dynamic encoding-summarization (blending)
         multiple_items = seq_encs
 
         blendded_vector, attention_scores = self.att(query, multiple_items, mask=weight) # [B, #_of_items]
-        # blendded_vector  : [B, dim_of_sequence_enc]
-        # attention_scores : [B, query_len, key_len] 
+        # blendded_vector  : [B, dim_of_sequence_enc] torch.Size([200, 512]) => 12개의 글자를 어텐션 스코어를 통해 하나로 합침
+        # attention_scores : [B, query_len, key_len]  #torch.Size([200, 1, 12])
 
         # To output
         logits = self.to_output(blendded_vector)
+        #to_ouput == Linear(in_features=512, out_features=9, bias=True)
+        #torch.Size([200, 9])
+        
         return logits, attention_scores
 
     def training_step(self, batch, batch_idx):
@@ -311,7 +349,9 @@ class Attention_Number_Finder(pl.LightningModule):
         loss = self.criterion(logits, y_id.long()) 
         self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
 
-        # all logs are automatically stored for tensorboard
+        # y_id[0]==tensor(7), 
+        # logits[0]==tensor([ 0.0486, -0.0049, -0.0071,  0.0759,  0.0287, -0.0194,  0.0182,  0.0448, -0.0062],
+        # # all logs are automatically stored for tensorboard
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -361,6 +401,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 plt.rcParams['figure.figsize'] = [10, 8]
 def check_attention(model, ex, input_vocab, output_vocab):
+
     seq_ids, q_id, weights, y_id = ex
     seq_ids = seq_ids.to(model.device)
     q_id = q_id.to(model.device)
@@ -383,7 +424,7 @@ def check_attention(model, ex, input_vocab, output_vocab):
             input_sym = [ input_vocab[i.item()] for i in a_seq_ids[:N] ]
             q_sym = input_vocab[a_q_id.item()]
 
-            ref_y_sym = output_vocab[a_y_id_pred.item()]
+            ref_y_sym = output_vocab[a_y_id.item()]
             pred_y_sym = output_vocab[a_y_id_pred.item()]
 
             scores = a_att_scores.cpu().detach().numpy()[0][:N].tolist() 
@@ -392,9 +433,9 @@ def check_attention(model, ex, input_vocab, output_vocab):
             data = { 'scores':[] }
             for word, score in zip(input_sym, scores):
                 data['scores'].append( score )
-                df = pd.DataFrame(data)
+            df = pd.DataFrame(data)
             df.index = input_sym
-
+  
             plt.figure()
             #sns.set(rc = {'figure.figsize':(2,8)})
             sns.heatmap(df, cmap='RdYlGn_r')
@@ -438,7 +479,7 @@ def cli_main():
     # training
     # ------------
     trainer = pl.Trainer(
-                            max_epochs=10, 
+                            max_epochs=60, 
                             callbacks=[EarlyStopping(monitor='val_loss')],
                             gpus = 1 # if you have gpu -- set number, otherwise zero
                         )
@@ -450,8 +491,7 @@ def cli_main():
     result = trainer.test(model, test_dataloaders=dm.test_dataloader())
     print(result)
 
-    #{'test_acc': 0.9002000093460083, 'test_loss': 0.2369374930858612}
-
+    #{'test_acc': 0.9039999842643738, 'test_loss': 0.2998247742652893}
 
     # ------------
     # Check the attention scores to attend on multiple items
@@ -459,6 +499,7 @@ def cli_main():
     #model = Attention_Number_Finder.load_from_checkpoint('./lightning_logs/version_15/checkpoints/epoch=0-step=179.ckpt').to('cuda:0')
     ex_batch = iter(dm.test_dataloader()).next()
     check_attention(model, ex_batch, dm.input_r_vocab, dm.output_r_vocab)
+
 
 if __name__ == '__main__':
     cli_main()
